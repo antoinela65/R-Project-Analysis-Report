@@ -1,6 +1,6 @@
 # Predictive Fundraising Analysis for a Charity Foundation
 
-This project is focused on applying **statistical inference** and **supervised learning** techniques using R to optimize a charity foundation’s fundraising campaign for 2024. The goal is to determine the optimal number of appreciation kits to send to members to maximize donations while considering budget constraints.
+This project is focused on applying **statistical inference** and **supervised learning** techniques using R to optimize a charity foundation’s fundraising campaign for 2024. The goal is to determine the optimal number of appreciation kits to send to members to maximize donations while considering budget constraints. This project was completed with two of my other classmates as part of the Applied Multidimensional Analysis course, offered in French, in my Master's in Business Intelligence program at HEC Montréal. 
 
 ---
 
