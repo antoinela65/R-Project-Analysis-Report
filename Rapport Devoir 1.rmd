@@ -1,0 +1,1108 @@
+---
+Title: Devoir 1 Rapport
+Output: html_document
+Date: "2024-10-16"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+options(repos = c(CRAN = "https://cloud.r-project.org/"))
+ 
+```
+
+## Rapport Devoir 1
+
+# Objectif du Projet
+
+Dans le cadre de ce projet, nous sommes mandatés d'aider un fondation caritative avec sa campagne de financement pour l'année 2024. Notre rôle exact consiste à déterminer quels membres de la fondation auront l'opportunité de recevoir une trousse de remerciement, les incitant à donner pour la campagne. L'objectif d'affaires est donc de maximiser les dons reçus pour la campagne selon la liste des membres à qui nous allons envoyés une trousse de remerciement. Naturellement, on souhaite donc envoyer les trousses aux membres qui vont faire les plus grandes donations à la campagne de financement. La fondation a accès à plusieurs sources de données concernant ses membres, incluant des informations de base sur les membres, leur historique de dons, leurs interactions sur les réseaux sociaux ainsi que les membres ayant consulté l'inforlettre de la fondation.
+Notre mission est de prédire le nombre de trousses enyoyés et quels membres la recevront pour l'année 2024. 
+
+Grâce à la collaboration d'une entreprise locale, la fondation a la chance d'envoyer jusqu’à 60 000 trousses au faible coût de 5$ par trousse. Ensuite, au-delà du seuil de 60 000, la fondation devra payer le coût total qui est de 25$ par unité. L'enjeu pour ce projet sera donc de cibler les membres les plus suscepibles de faire un don suite à la réception de la trousse, afin d'optimiser le profit, tout en respectant ces contraintes de coûts.
+
+# Collecte de données
+
+Pour ce projet, nous avons travaillé avec plusieurs données provenant de plusieurs fichiers CSV distincts. 
+
+
+Nous avons débuté par importer ces fichiers dans notre environnement global sur R. Nous avons également installé toutes les librairies et packages qu'on a jugé essentiel à utiliser lors de l'analyse. 
+
+Nous assumons que le lecteur a accès à ces données.
+
+```{r}
+
+# Load MembersList
+members_list <- read.csv("MembersList.csv", stringsAsFactors = FALSE)
+ 
+# Load DonationHistory
+donation_history <- read.csv("DonationHistory.csv", stringsAsFactors = FALSE)
+ 
+# Load NewsletterRead
+newsletter_read <- read.csv("NewsletterRead.csv", stringsAsFactors = FALSE)
+ 
+# Load SocialNetworkUsage
+social_network_usage <- read.csv("SocialNetworkUsage.csv", stringsAsFactors = FALSE)
+
+Membersxl <- members_list
+DonationHistory <- donation_history
+NewsletterRead <- newsletter_read
+SocialNetworkUsage <- social_network_usage
+
+# Installer les packages necessaires
+install.packages("sampleSelection")
+install.packages("rsample")
+install.packages("MASS")
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(hecmulti)
+library(sampleSelection)
+library(rsample)
+library(MASS)
+library(scales)
+```
+
+Avant de commencer avec la transformation des données, il est très important de définir la variable cible pour cette analyse.
+
+Puisqu'on cherche à envoyer les trousses aux membres qui vont faire les plus grandes donations pour maximiser le profit, on peut diviser le problème en deux parties: 
+
+  1) Prédire les membres qui vont donner: "ydon_2023"
+  2) Prédire le montant qu'il vont donner: "Donation_2023"
+  
+
+Cette méthode d'analyse va nous permettre de construire un modèle robuste qui tient compte à la fois de la probabilité qu’un don soit fait et de l’estimation du montant donné par chaque membre pour l'année 2024.
+
+
+## Analyse exploratoire des données (EDA)
+
+Notre plan de départ consistait à traiter chaque fichier de manière indépendante afin de créer des variables spécifiques à chaque source de données et de procéder à une fusion finale par la suite en un seul jeu de données. Vous allez donc apercevoir que la partie d'analyse exploratoire des donnés a été séparé en quatre parties selon chaque fichier csv.  
+
+Par contre, à partir du deuxième jeu de données (MembersList), nous avons décidé de changer de stratégie et de plutôt opté pour une approche intégrée.
+Ainsi, cette approche a consisté à intégrer les variables clés au fur et à mesure que l'analyse exploratoire progresse vers un tableau final.
+
+Nous débutons par la vérification et l'évaluation de la structure de chaque table de données. Cela implique, pour chaque table, d'identifier les variables catégorielles, de repérer les variables comportant des valeurs manquantes (en précisant leur quantité et la manière dont elles sont déclarées), et d'examiner les statistiques descriptives afin d'obtenir une vue d'ensemble complète des données.
+
+
+# 1. Tableau DonationHistory
+
+```{r}
+str(DonationHistory)
+View(DonationHistory)
+```
+
+Le tableau contient trois variables numériques : "ID", "Yr" et "Amount". Ainsi, lorsqu'un membre a effectué plusieurs dons, celui-ci apparaît plusieurs fois dans le tableau. 
+Pour obtenir des valeurs uniques par ligne, nous avons restructuré le tableau afin de regrouper les dons par année, de 2012 à 2023, pour chaque membre. Cela a rendu l'analyse directe du comportement de dons des membres dans le temps plus claire. Le nouveau tableau est nommé
+"DonationsPerYear"
+
+```{r}
+DonationsPerYear <- DonationHistory |>
+  mutate(Yr = as.numeric(Yr)) |>  
+  pivot_wider(names_from = Yr, values_from = Amount, values_fill = 0) %>%
+  dplyr:: select(ID, order(as.numeric(names(.)[-1])) + 1)
+```
+
+Avec le tableau ainsi structuré, nous souhaitons également obtenir des statistiques descriptives des dons pour chaque année.
+
+```{r}
+StatsYearly <- DonationHistory |>
+  dplyr::group_by(Yr) |>
+  dplyr::summarise(
+    total_dons = sum(Amount, na.rm = TRUE),
+    moyenne_dons = mean(Amount, na.rm = TRUE),
+    min_dons = min(Amount, na.rm = TRUE),
+    max_dons = max(Amount, na.rm = TRUE),
+    nombre_dons = n()
+  )
+
+View(StatsYearly)
+```
+
+En 2023, le nombre total de dons s'élève à 142 123 pour un montant global de 9 356 270 $.
+
+Le montant des dons, pour chaque année, varie entre un minimum de 10 $ et un maximum de 10 000 $, à l'exception de 2014 où le don maximal était de 9 000 $. Les grands écarts de montants signifient qu'il y a fort probablement des valeurs extrêmes qui pourront influencer le modèle.
+
+Le nombre et la moyenne des dons ont connu leur plus forte augmentation entre 2022 et 2023.
+
+Ces observations nous ont menés à créer trois variables pour capturer le comportment des dons
+historiquement. Les variables "Donations_2023" et "Donations_2022" mettent en lumière les années clés que l'analyse a mises en évidence. La variable "Sum_Donations"capture la gravité des dons des membres historiquement. En séparant les dons selon trois périodes distinctes, nous pouvons observer des tendances dans les habitudes de donation. Cela nous permet de comparer les comportements récents (2023 et 2022) aux contributions passées (2012-2021). 
+
+• Donations_2023 : Valeur des dons effectués en 2023 pour chaque membre
+
+• Donations_2022 : Valeur des dons effectués en 2022 pour chaque membre
+
+• Sum_Donations : Somme des dons effectués de 2012 à 2021 pour chaque membre
+
+```{r}
+
+## Pour créer la colonne "Donation_2023"
+DonationsPerYear$Donation_2023 <- DonationsPerYear[["2023"]]
+
+## Pour créer la colonne "Donation_2022"
+DonationsPerYear$Donation_2022 <- DonationsPerYear[["2022"]]
+
+## Pour créer la colonne ""Sum_Donations" de 2012 a 2022
+DonationsPerYear$Sum_Donations <- rowSums(DonationsPerYear[, as.character(2012:2021)])
+
+
+```
+
+Ensuite, on a crée notre variable cible pour la régresssion logistique (ydon_2023).
+De plus, on a décidé d'inclure une variable binaire nommé ydon_2022 dans notre modèle, afin de capturer le comportement de donation récent des individus. 
+
+Le fait qu'un individu ait donné dans les années les plus récentes est souvent un indicateur fort de sa propension à donner à nouveau. Ainsi, on pense que ce variable agit comme un prédicteur potentiellement puissant pour modéliser les futurs comportements de don. Finalement, en classant les individus selon s'ils ont fait un don récemment ou non, ces variables permettent de segmenter les donateurs actifs des inactifs. 
+
+```{r}
+# Créer la variable binaire ydon_2023 basée sur les valeurs non nulles de la variable Donation_2023
+DonationsPerYear$ydon_2023 <- ifelse(!is.na(DonationsPerYear$Donation_2023) & DonationsPerYear$Donation_2023 > 0, 1, 0)
+
+# Créer la variable binaire ydon_2022 basée sur les valeurs non nulles de la variable Donation_2022
+DonationsPerYear$ydon_2022 <- ifelse(!is.na(DonationsPerYear$Donation_2022) & DonationsPerYear$Donation_2022 > 0, 1, 0)
+```
+
+
+
+```{r}
+# Transfert de la table Membersxl vers FinalTable 
+FinalTable <- Membersxl
+
+  # Création de la variable Num_Donations
+  DonationsPerYear$Num_Donations <- rowSums(DonationsPerYear[, as.character(2012:2023)] > 0, na.rm = TRUE)
+
+# Join the Num_Donations column from DonationsPerYear to FinalTable using the ID column
+FinalTable <- FinalTable %>%
+  dplyr::left_join(DonationsPerYear %>% dplyr::select(ID, Num_Donations), by = "ID")
+
+# Remplacer les NA dans la colonne Num_Donations par 0
+FinalTable <- FinalTable |>
+  dplyr::mutate(Num_Donations = tidyr::replace_na(Num_Donations, 0))
+```
+
+# 2. Tableau Membersxl
+
+```{r}
+str(Membersxl)
+View(Membersxl)
+```
+
+**Observations**:
+
+• Les variables Education et City sont catégorielles, mais elles n'ont pas été correctement traitées comme des facteurs.
+
+• La variable "Sexe" est actuellement nommée "Woman". Nous allons renommer cette variable en "Sexe" pour plus de cohérence.
+
+• En ce qui concerne la variable Salaire, le minimum est à 0. Il convient de se demander si cela reflète une absence de déclaration de salaire de la part du membre ou si son salaire est effectivement nul.
+
+Le code suivant permet de convertir les variables alphanumériques en facteurs dans notre tableau des variables explicatives :
+
+```{r}
+FinalTable <- FinalTable |>
+  mutate(
+    Education = as.factor(Education),
+    City = as.factor(City),
+  )
+
+head(Membersxl)
+
+```
+
+Pour répondre au dernier point des observations, en analysant la colonne des salaires et en filtrant les valeurs les plus basses, on trouve qu'il y a autour de 600 membres ayant un salaire de zéro. Cela représente une proportion très faible (0.06%), surtout si on considère que la majorité de ces membres ayant un salaire de 0 sont des étudiants ou des retraités.
+En effet, on peut remarquer qu'environ la moitié des membres font partie de cette catégorie (Âge < 22 ou > 59). 
+
+```{r}
+# Filtrer les membres avec un salaire égal à 0 et un âge inférieur à 21 ou supérieur à 60
+filtered_members <- Membersxl[Membersxl$Salary == 0 & (Membersxl$Age < 22 | Membersxl$Age > 59), ]
+
+# Afficher le résultat
+print(filtered_members)
+
+
+```
+
+On a décidé de baser notre modèle final avec les variables du tableau MembersList à cause que toutes les variables de la table comme l’âge, le sexe, le niveau d’éducation, le salaire, etc. semblent être pertinentes à inclure à première vue. En effet, celles-ci sont généralement considérées comme des variables pouvant influencer le comportement des individus, notamment en terme de donation. Ces variables démographiques et socio-économiques peuvent fournir des informations précieuses sur les tendances comportementales et permettre de mieux segmenter la population en fonction de critères qui pourraient impacter la probabilité d'un individu de faire un don. En les intégrant dans notre modèle, nous pouvons améliorer sa capacité à capturer des différences individuelles et à prédire plus précisément les donations.
+
+
+```{r}
+
+
+## Renommer certains noms de variables pour des raisons de clarification
+FinalTable <- FinalTable|>
+  dplyr::rename(Last_Name=LastName)|> 
+  dplyr::rename(First_Name=FirstName)|>
+  dplyr::rename(Email=email) |>
+  dplyr::rename(Sexe=Woman)
+  
+```
+
+Nous allons également ajouter les variables qu'on a crées précedemment dans la section du tableau DonationHistory. 
+Voici donc les variables à inclure dans "FinalTable" : Donation_2023, Donation_2022, Sum_Donations, ydon_2023 et ydon_2022.
+
+```{r}
+FinalTable <- FinalTable |>
+  dplyr::left_join(
+    DonationsPerYear |> 
+      dplyr::select(ID, Donation_2023, Donation_2022, Sum_Donations, ydon_2023, ydon_2022), 
+    by = "ID"
+  )
+
+## Remplacer les "NA" par 0 dans toutes les colonnes
+FinalTable <- FinalTable |>
+  dplyr::mutate_at(vars(Donation_2023, Donation_2022, Sum_Donations, ydon_2023, ydon_2022), 
+                   ~ tidyr::replace_na(., 0))
+
+```
+
+Maintenant que nous avons établi la base de notre tableau final, nous allons analyser chacune des variables afin de détecter des tendances et démontrer leur pertinence dans notre modèle final. Cela nous permettra d'évaluer l'impact potentiel de ces variables sur le comportement des donateurs au cours de l'année précédente, renforçant ainsi leur inclusion dans le modèle prédictif.
+
+
+```{r}
+ggplot(FinalTable, aes(x = as.factor(ydon_2022), fill = as.factor(ydon_2023))) +
+  geom_bar(position = "dodge") +
+  labs(x = "ydon_2022", y = "Count", fill = "Ydon") +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+
+```
+
+
+On voit que le graphique semble indiquer que les personnes qui n'ont pas donné en 2022 (ydon_2022 = 0) sont majoritairement représentées dans le groupe qui n'a pas donné en 2023 (en rouge), alors qu'un nombre plus faible de personnes ayant donné en 2022 (ydon_2022 = 1) ont également fait un don en 2023 (en bleu). Le comportement de don en 2022 pourrait donc avoir un lien intéressant avec la probabilité de donner en 2023, bien que le nombre de donateurs en 2022 soit relativement faible par rapport aux non-donateurs. Pour finir, ce graphique soutient la théorie que la variable binaire ydon_2022 pourrait être un bon prédicteur du don en 2023, car il semble y avoir une certaine continuité dans le comportement de don d'un an à l'autre.
+
+
+Afin d'analyser la fréquence des dons effectués par chaque membre, nous avons créé une variable appelée Num_Donations. Cette variable calcule donc le nombre de fois qu'un membre a effectué un don depuis le début de son adhésion. Cette variable va nous permettre de mieux comprendre les comportements récurrents des donateurs, de distinguer entre les donateurs réguliers et occasionnels et d'explorer l'impact de la fréquence des dons sur la probabilité de continuer à donner à l'avenir.
+
+```{r}
+ggplot(DonationsPerYear, aes(x = Num_Donations, fill = as.factor(ydon_2023))) +
+  geom_histogram(alpha = 0.5, bins = 12) +
+  labs(x = "Times Donated", fill = "Ydon") +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+
+```
+
+On observe que la majorité des membres ont effectué peu de dons au fil des ans, avec une grande concentration de membres qui n'ont fait aucun don ou seulement un ou deux dons. Ce comportement est visible pour les deux groupes, ceux ayant fait un don en 2023 (en bleu) et ceux qui en ayant pas fait (en rouge).
+
+Cependant, il peut être important de noter que les individus qui ont fait plusieurs dons dans le passé (plus de 2 fois) sont plus susceptibles de continuer à faire des dons en 2023. Cela semble suggérer une corrélation positive entre le nombre de dons passés et la probabilité de donner à nouveau en 2023. 
+Par conséquent, on estime que la variable Num_Donations capture un comportement historique pertinent et doit être incluse dans notre modèle prédictif. Elle aide à mieux comprendre la fréquence des dons et à identifier les membres qui sont des donateurs récurrents, augmentant ainsi la précision du modèle pour prévoir les dons futurs.
+
+On a d'abord jugé intéressant d'inclure la variable Salary dans le modèle pour plusieurs raisons. Tout d'abord, le salaire est normalement directement liée à la capacité financière d'une personnne. En général, plus le revenu d'un individu est élevé, plus il est probable qu'il puisse faire un don plus conséquent. En intégrant le salaire dans le modèle, on peut donc capturer cette capacité potentielle de don, qui peut grandement influencer le montant estimé.
+Analysons la distribution des salaires des membres pour tenter de trouver des caractéristiques importantes qui pourraient motiver l'inclusion de la variable dans le modèle: 
+
+```{r}
+hist(FinalTable$Salary, main="Distribution des Salaires", xlab="Salaire", breaks=50)
+
+
+```
+
+La forme de cette distribution nous indique que la variable Salary peut être une variable importante à inclure dans le modèle. La variabilité de la variable, la présence de valeurs extrêmes et la forte concentration de salaires bas sont des indices que cette variable pourrait jouer un rôle crucial pour capturer des tendances et des comportements liés aux revenus. Inclure cette variable nous permettrait de mieux différencier les membres selon leurs niveaux de revenus et ainsi d'améliorer la performance prédictive du modèle. 
+
+Nous allons maintenant explorer si la variable Salary a une réelle chance d'influencer directement la probabilité qu'un individu fasse un don. On cherche donc à prouver que les individus ayant des salaires plus élevés pourraient être plus enclins à faire des dons, en raison de leur capacité financière accrue. Afin de vérifier cette hypothèse, nous allons réaliser un graphique mettant en relation Salary et la variable Donation_2023 qui indique si un individu a fait un don en 2023. 
+
+
+
+```{r}
+ggplot(FinalTable, aes(x = as.factor(ydon_2023), y = Salary)) +
+  geom_boxplot() +
+  labs(x = "Ydon_2023", y = "Salary") +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+
+```
+
+Comme on peut l'apercevoir avec ce graphique, il ne semble pas avoir de réelle différence dans le comportement de donation en 2023 par rapport au salaire gagné. On peut donc insinuer que cette variable ne sera pas considérée comme une variable très importante au modèle prédictif. On va tout de même décider de l'inclure à cause de son importance théorique en tant que facteur déterminant au comportement de donation et puisque sa distribution présente une grande variabilité ainsi que plusieurs valeurs extrêmes que le modèle pourrait capter dans sa prédiction.
+
+Nous allons répéter le même exercice pour les autres variables (Sexe, Âge, Education et City) en les comparant avec la variable de proportion de donateurs en 2023 (ydon_2023) dans d'autres graphiques. 
+ 
+Poursuivons avec l'analyse de la variable de sexe. 
+Plusieurs études du passé démontre que les hommes et les femmes peuvent avoir des approches différentes en matière de dons. Par exemple, les femmes peuvent être plus enclines à faire des dons plus fréquents mais de montants plus faibles, tandis que les hommes pourraient donner moins souvent mais des montants plus importants. Cette variable peut donc aider à ajuster les prévisions en fonction des tendances de don par sexe.
+On va tenter de trouver une différence de comportement entre les sexes pour les dons effectués en 2023. 
+
+```{r}
+ggplot(FinalTable, aes(x = Sexe, fill = as.factor(ydon_2023))) +
+  geom_bar(position = "fill") +
+  labs(y = "Proportion", fill = "Ydon") +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+```
+
+Comme on peut l'apercevoir avec ce graphique, les hommes (0) et les femmes (1) présentent des proportions de donateurs très similaires. En effet, le pourcentage de donateurs (partie bleue) et de non-donateurs (partie rouge) est presque identique pour les deux groupes.
+Il semble donc que le sexe ne soit pas un facteur discriminant pour expliquer la probabilité de faire un don, car la répartition est visuellement presque la même pour les hommes et les femmes en 2023.
+Cela suggère que le sexe, à lui seul, pourrait ne pas être un fort prédicteur dans le modèle.
+
+Toutefois, on croit qu'il est très possible que la variabe Sexe interagisse fortement avec d'autres variables, comme l'âge ou le salaire, et ainsi influencer la probabilité de faire un don. Pour cette raison, on a décidé de l'inclure dans notre modèle final, non seulement pour évaluer sa signification statistique, mais aussi pour voir si elle contribue suffisamment aux prédictions. 
+
+
+On va ensuite étudie l'impact de la variable d'âge.
+
+L'âge reflète à quel stade de la vie se trouve une personne, ce qui peut influencer directement leur capacité financière et leur attitude envers le don. Nous pouvons supposer que les jeunes adultes peuvent avoir des revenus plus bas et moins de liquidités disponibles pour faire des dons, tandis que les personnes plus âgées peuvent avoir plus de revenus disponibles et être plus enclins à donner des montants plus élevés, surtout s'ils approchent de l'âge de la retraite. Certaines générations ont donc des attitudes différentes vis-à-vis les dons, ce qui peut influer sur le montant donné. Les données sur l'âge permettront peut-être de mieux comprendre ces tendances et d'affiner les prédictions de don du modèle.
+
+Vérifions si les différences d'âge peuvent influencer des différences de comportement pour les dons effectués en 2023 à l'aide de ce graphique.
+
+```{r}
+ggplot(FinalTable, aes(x = as.factor(ydon_2023), y = Age)) +
+  geom_boxplot() +
+  labs(x = "Ydon", y = "Age") +
+  scale_y_continuous(labels = comma) + 
+  theme_minimal()
+
+```
+On voit que ce graphique n'indique pas une relation fortement marquée entre l'âge et la probabilité de faire un don en 2023 (ydon_2023).
+On apercoit une légère différence, mais cela demeure peu informatif tout de même. 
+Cependant, malgré le fait que ce lien semble faible à première vue  nous avons tout de même choisi d'inclure la variable d'âge dans notre modèle final. Cette décision est encore motivée par le fait que, l'âge pourrait interagir avec d'autres variables, comme le salaire ou le sexe, pour influencer la probabilité de don. De plus, il est possible que des relations plus subtiles ou des non-linéarités apparaissent lorsque toutes les variables sont prises en compte dans le modèle de régression. Il demeure donc judicieux de conserver cette variable afin d'obtenir une meilleure compréhension de son rôle potentiel.
+
+Passons ensuite à l'étude de la variable Education. 
+
+L'éducation peut être représenté comme un indicateur de différents comportements ou attitudes, tels que le niveau de revenu, la stabilité financière, ou les valeurs sociales. Ces facteurs peuvent influencer de manière directe ou indirecte le fait d'effectuer un don. 
+
+Vérifions si c'est le cas avec ce graphique:
+```{r}
+ggplot(FinalTable, aes(x = as.factor(Education), fill = as.factor(ydon_2023))) +
+  geom_bar(position = "dodge") +  
+  labs(x = "Niveau d'éducation", y = "Nombre", fill = "Ydon") +
+  scale_y_continuous(labels = scales::comma) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+À première vue, en regardant ce graphique, il semble que le nombre de dons en 2023 (indiqué par les barres bleues) augmente avec le niveau d'éducation, surtout pour les personnes ayant un diplôme universitaire ou collégial. Cependant, il est important de noter que cela peut être influencé par le simple fait que la population est plus nombreuse dans ces catégories d'éducation. 
+
+On va donc vérifier le nombre d'observations pour chacunes des catégories d'éducation avec ce tableau suivant :
+
+```{r}
+table_educ_ydon <- table(FinalTable$Education, FinalTable$ydon_2023)
+print(table_educ_ydon)
+```
+On apercoit en effet que l'augmentation des dons est liée à une plus grande proportion de personnes dans les catégories d'éducation plus élevée. Par contre, cela ne signifie pas que l'éducation est une variable inutile à avoir dans le modèle, au contraire. L'éducation pourrait interagir avec d'autres variables comme le salaire, l'âge, ou le sexe, ce qui pourrait révéler des relations plus complexes que celles observées isolément. Ces interactions pourraient avoir un impact significatif sur la propension à donner.
+
+De plus, inclure des variables comme l'éducation augmente la diversité des informations prises en compte par le modèle. Cela permet d'améliorer la capacité prédictive globale et la robustesse du modèle en s'assurant qu'aucune variable potentiellement importante ne soit négligée. Finalement, l'éducation peut représenter un facteur démographique pertinent qui capture des différences importantes dans la population, et donc, il est essentiel de l'inclure pour s'assurer que toutes les dimensions pertinentes sont prises en compte.
+
+
+Finalement, évaluons la variable City. 
+
+La localisation géographique, représentée par la variable City, peut refléter le niveau de vie et les coûts de la vie dans différentes régions. Les membres vivant dans des zones urbaines avec un coût de la vie plus élevé peuvent avoir des revenus plus élevés, mais aussi des dépenses plus importantes, ce qui peut influencer leur capacité à donner. De plus, certaines régions peuvent avoir une culture différente à propos de la philantropie, ce qui peut affecter la fréquence et le montant des dons. En connaissant cette valeur, on pourrait ainsi ajuster les prévisions en fonction des comportements typiques de dons dans ces régions spécifiques.
+
+```{r}
+ggplot(FinalTable, aes(x = as.factor(City), fill = as.factor(ydon_2023))) +
+  geom_bar(position = "dodge") +  
+  labs(x = "Région géographique", y = "Nombre", fill = "Ydon") +
+  scale_y_continuous(labels = scales::comma) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+En regardant ce graphique, on apercoit que la majorité des individus, qu'ils soient dans des zones urbaines (City), rurales (Rural), ou suburbaines (Suburban), n'ont pas fait de dons en 2023 (en rouge). Il semble aussi y avoir une faible proportion de donateurs dans toutes les régions (en bleu), mais cette proportion reste relativement constante entre les différentes zones géographiques. Il est intéressant de noter que les zones "City" et "Suburban" comptent le plus grand nombre de personnes, suivies de "Rural," tandis que "Downtown" a le nombre le plus faible. Cependant, la proportion de donateurs (en bleu) n'est pas sensiblement différente selon la région, ce qui pourrait indiquer que la région géographique n'a pas un impact majeur sur la probabilité de faire un don.
+
+Cela dit, on trouve toujours utile de garder la variable City dans le modèle, car elle pourrait interagir avec d'autres variables (comme le salaire ou l'éducation) et révéler des tendances importantes dans certaines combinaisons de facteurs. Elle pourrait aussi prouver utile pour segmenter les membres par zone géographique dans certaines circonstances des prédictions. 
+
+
+Une autre variable qu'on souhaite ajouter est Years_Membership, qui calcule le nombre d'année d'adhésion d'un membre. Il s'agit donc d'une mesure de l'ancienneté d'un membre. En fait, il s'agit d'une transformation de la colonne Joined en une approche qui décrit le nombre d'années au lieu de l'année d'adhésion du membre. On trouve qu'il est plus informatif et facile à interpréter pour le modèle d'avoir une durée de temps au lieu d'une date. En effet, il s'agit d'une mesure quantitative que le modèle pourra utiliser facilement. 
+
+Cette variable réflète le niveau d'engagement et de fidélité des membres. On peut presqu'assummer qu'un membre qui a été actif pendant plusieurs années a probablement un attachement émotionnel ou une connexion durable avec la cause, ce qui peut influencer positivement la probabilité de donner de nouveau. Cette variable va également nous aider à différencier les nouveaux membres des anciens. 
+
+Par contre, il faut faire attention aux biais. Par exemple, certains membres peuvent réprésenter des outliers s'ils sont membres depuis longtemps sans avoir fait de dons ou s'ils ont simplement oublié de se désabonner de la fondation. Pour cette raison, Years_Transformation ne devrait donc pas représenter la variable la plus importante du modèle final. Voici comment on a créer la variable et supprimer la variable Joined :    
+
+```{r}
+FinalTable <- FinalTable |>
+  dplyr::mutate(Years_Membership=2023-Joined)
+
+```
+
+
+La dernière variable du tableau Members_List qu'on souhaite inclure s'appelle Yr_Until_Donation. Cette variable permet de capturer le temps passé (en année) avant qu'un membre effectue sa première donation. On trouve que cette variable peut être un indicateur précieux à inclure dans le modèle afin d'analyser les habitudes de don des membres ainsi que leur comportement au fil du temps. Cette analyse de comportement peut être utile pour segmenter les membres entre les donateurs prcoces et tardifs, ce qui est essentiel pour adapter les prédictions de dons futurs.
+
+Par exemple, un long délai avant le premier don d'un membre peut indiquer une hésitation ou un engagement plus faible envers les dons, tandis qu'un délai court peut révéler son enthousiasme ou une forte adhésion envers la mission de l'organisation. Yr_Until_Donation peut donc améliorer la capacité du modèle à prévoir qui fera un don, en tenant compte du comportement de chaque membre depuis leur adhésion. 
+
+Voici comment nous allons procéder à la création de la variable Yrs_Until_Donation :
+
+```{r}
+
+##Définir les colonnes d'années
+year_columns <- as.character(2012:2023)
+
+## Calculer le nombre d'années qu'à mis un donateur à faire son premier don (Yrs_Until_Donation)
+YearsToFirstDonation <- DonationsPerYear |>
+  dplyr::left_join(FinalTable |> dplyr::select(ID, Joined), by = "ID") |>
+  dplyr::rowwise() |>
+  dplyr::mutate(
+    FirstNonZeroYear = {
+      values <- c_across(all_of(year_columns))
+      first_non_zero <- which(values != 0)[1]
+      if (!is.na(first_non_zero)) {
+        as.numeric(year_columns[first_non_zero])
+      } else {
+        NA_real_
+      }
+    }
+  ) |>
+  dplyr::ungroup() |>
+  dplyr::mutate(
+    Yr_Until_Donation = FirstNonZeroYear - Joined
+  ) |>
+  dplyr::select(ID, Yr_Until_Donation)
+
+##Nous voulons ensuite remplacer les valeurs NA par 0 si les membres n'ont jamais fait de don depuis qu'ils sont membres.
+FinalTable <- FinalTable |>
+  dplyr::left_join(YearsToFirstDonation, by = "ID") |>
+  dplyr::mutate(Yr_Until_Donation = tidyr::replace_na(Yr_Until_Donation, 0))
+
+
+## Supprimer Joined de la table puisqu'on en a plus besoin
+FinalTable <- FinalTable |>
+  dplyr::select(-Joined)
+
+```
+
+
+```{r}
+ggplot(FinalTable, aes(x = Yr_Until_Donation, fill = as.factor(ydon_2023))) +
+  geom_histogram(alpha = 0.5, bins = 12) +
+  labs(x = "Year to first donation", fill = "Ydon") +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+```
+Ici, on voit qu'il y a une tendance pour le nombre de donateurs de diminuer avec le temps. Mais, on voit qu'il y a une hausse dans la deuxieme année. Ceux qui pointe à l'importance de la variable Years_Membership.
+
+
+
+# 3. Tableau SocialNetworkUsage
+
+```{r}
+str(SocialNetworkUsage)
+head(SocialNetworkUsage)
+```
+
+**Observations**:
+
+• La colonne "Nom" contient à la fois le prénom et le nom dans une seule cellule, et plusieurs incohérences y sont présentes, comme l'usage de lettres   minuscules ou des entrées familiales (ex. : "The RYANs").
+
+• Certaines observations présentent des données manquantes pour le prénom, le nom ou l'adresse email.
+
+• En classant les emails par ordre alphabétique, des doublons et parfois même des triplets de membres apparaissent.
+
+• Pour de nombreux utilisateurs des médias sociaux, il n'est pas possible de déterminer s'ils sont membres ou non.
+
+• Dans la colonne Member, plusieurs valeurs sont manquantes (NA) ou indiquent que l'individu n'est pas membre. Ces entrées ne pourront donc pas être utilisées dans l'analyse.
+
+
+Nous allons d'abord créer une copie de la base de données avant de la modifier, afin de ne conserver que les membres ayant utilisé les médias sociaux.
+
+```{r}
+SocialNetworkMembers <- SocialNetworkUsage |>
+  dplyr::filter(Member == TRUE) |>
+  dplyr::distinct()
+```
+
+Nous sommes passés de 1 millions d'observations à 122 226 observations pour ce tableau. Nous souhaitons maintenant déterminer combien d'adresses courriel peuvent être associés à un ID.
+
+```{r}
+num_emails <- SocialNetworkMembers |>
+  dplyr::summarise(count = sum(!is.na(email))) |>
+  dplyr::pull(count)
+
+SocialNetworkMembers <- SocialNetworkMembers |>
+  tidyr::separate(Name, into = c("First_Name", "Last_Name"), sep = " ", extra = "merge", fill = "right")
+```
+
+On va ensuite remplacer toutes les occurrences de "The" par NA dans la colonne First_Name et supprimer le "s" minuscule à la fin des noms dans la colonne Last_Name.
+
+```{r}
+# Remplacer "The" par NA dans la colonne First_Name
+
+SocialNetworkMembers <- SocialNetworkMembers |>
+  dplyr::mutate(First_Name = dplyr::na_if(First_Name, "The"))
+
+# Supprimer le "s" minuscule à la fin des noms dans la colonne Last_Name
+
+SocialNetworkMembers <- SocialNetworkMembers |>
+  dplyr::mutate(Last_Name = stringr::str_replace(Last_Name, "s$", ""))
+```
+
+**Conclusion** : Après le nettoyage des données, nous avons pu associer avec certitude 50 127 membres sur les 122 226 observations. Étant donné que seul une partie des membres a été correctement identifiée, nous avons décidé de ne pas utiliser ces données afin d'éviter de biaiser le modèle. 
+En effet, la réduction du jeu de données originale est drastique (réduction de 95% ; 50 000 sur 1 000 000 entrées), il est donc valide de considérer que le volume de données nettoyées (représentant moins de 10% du total initial) est devenu insuffisant pour produire des résultats robustes. 
+Voilà pourquoi nous avons décidés de ne pas inclure de variables liées à l'utilisation des réseaux sociaux dans notre modèle final.   
+
+
+# 4. Tableau NewsLetterRead
+
+Dans le cadre de notre analyse, on a estimé d'emblée que les données reliées à la consultation des infolettres (newslettersread) constituent un aspect important pour évaluer l'engagement des membres. Ces informations pourront être cruciales pour comprendre comment les membres interagissent avec la fondation et pour prédire leur propension à faire des dons. Cependant, après une première analyse de la table, on a remarqué que les données étaient séparées par mois et sur plusieurs colonnes, ce qui rendait difficile le fait d'obtenir une vue d'ensemble claire de leur impact sur notre modèle.
+
+```{r}
+str(NewsletterRead)
+head(NewsletterRead)
+```
+
+**Observations** :
+
+• Le tableau pourrait être simplifié en résumant certaines variables, telles que le nombre total d'ouvertures d'infolettres pour l'année ou en indiquant si un membre a déjà ouvert l'infolettre.
+
+• Chaque observation est associée à un membre via son adresse courriel.
+
+
+Ainsi, afin de mieux exploiter ces données, nous avons décidé de synthétiser les informations en une seule colonne nommé "Times_Read". Cette nouvelle variable nous permet donc d'unifier les indicateurs d'engagement au cours de l'année en une seule valeur pour chaque identifiant. On souhaite ajouter cette variable à notre modèle pour mesurer l'intérêt et l'engagement des membres au cours de l'année. Cela pourrait potentiellement être lié à une propension plus élevé. C'est une variable qui peut être importante à considérer pour mieux comprendre les comportements qui influencent la décision de donner.       Voici le code qui nous a aidé à créer Times_Read:
+
+```{r}
+
+
+NewsletterRead <- NewsletterRead |>
+  dplyr::mutate(Times_Read = rowSums(dplyr::across(-email)))|>
+  dplyr::rename(Email=email)
+
+FinalTable <- FinalTable |>
+  dplyr::left_join(
+    NewsletterRead |>
+      dplyr::select(Email, Times_Read),  # On sélectionne `Times_Read` nouvellement calculée
+    by = "Email"
+  )
+
+```
+
+
+Regardons la distribution et l'impact de Times_Read par rapport à la variable ydon_2023. 
+
+```{r}
+ggplot(FinalTable, aes(x = Times_Read, fill = as.factor(ydon_2023))) +
+  geom_histogram(alpha = 0.5, bins = 12) +
+  labs(x = "Times Read", fill = "Ydon") +
+  scale_y_continuous(labels = comma) +
+  theme_minimal()
+```
+On remarque que la majorité des membres, qu'ils aient fait un don ou non, ont un nombre relativement faible de lectures. Une grande partie des membres ayant fait peu ou pas de lectures ne fait pas de don. On observe aussi qu'un petit nombre de membres ayant fait plus de lectures (Times_Read élevé) sont plus susceptibles de faire des dons. Cela suggère une tendance selon laquelle un engagement plus élevé avec le contenu (mesuré par le nombre de lectures) pourrait être lié à la probabilité de donner.
+
+Le nombre de lectures (Times_Read) est donc un bon indicateur de l'engagement des membres. Un membre qui lit plus fréquemment les communications de la fondation pourrait être plus intéressé ou impliqué dans ses activités, et donc plus susceptible de donner. 
+On conclut qu'on va inclure Times_Read dans le modèle final afin de pouvoir capturer une dimension comportementale essentielle qui est celle de l'engagement. Celle-ci pourrait avoir une influence significative sur la probabilité de donner des membres.
+
+
+## **Liste des 18 variables** 
+
+Récapitulons. Voici la liste complète des variables contenues dans le tableau final "FinalTable" qui va être utilisé afin de construire notre modèle.
+
+
+1. ID : Identifiant unique du membre. 
+
+2. Last Name : Nom de famille du membre. 
+
+3. First Name : Prénom du membre. 
+
+4. Email : Courriel du membre 
+
+5. Sexe : Genre du membre, codé sous forme binaire (0 pour homme, 1 pour femme). 
+
+6. Age : Âge du membre en années. 
+
+7. Salary : Salaire annuel estimé du membre. 
+
+8. Education : Niveau d'éducation du membre (ex.: High School, University/College). 
+
+9. City : Localisation géographique du membre (ex: City, Suburban).
+
+10. Donation_2023 : Montant des dons effectués par le membre en 2023. 
+
+11. Donation_2022 : Montant des dons effectués par le membre en 2022.
+
+12. Sum_Donations : Somme totale des dons effectués par le membre entre 2012 et 2021.
+
+13. ydon_2023 : Variable binaire indiquant si le membre a fait un don en 2023 (1 pour oui, 0 pour non).
+
+14. ydon_2022 : Variable binaire indiquant si le membre a fait un don en 2022 (1 pour oui, 0 pour non).
+
+15. Num_Donations : Nombre total de dons effectués par le membre entre 2012 et 2023.
+
+16. Years_Membership : Nombre d'années que le membre est affilié à l'organisation.
+
+17. Yrs_Until_Donation : Nombre d'années avant que le membre effectue son premier don.
+
+18. Times_Read : Nombre de fois que le membre a ouvert les newsletters en 2023.
+
+``` {R}
+str(FinalTable)
+```
+
+# Régression Logistique
+
+## Sélection de variables et de modèle
+
+Si on veut prédire à qui envoyer un cadeaux, la première étape est de prédire
+qui va donnée. Pour ce faire, on va créer un modèle de régression logistique
+avec notre variable cible binaire "ydon_2023". Pour l'entraînement du modèle, nous avons diviser les données en échantillons de apprentissage (70%) et validation (30%)
+
+```{r}
+
+set.seed(777)  # Fixer la seed pour la reproductibilité
+
+# Diviser les données en 70% apprentissage et 30% test
+Appr_split <- initial_split(FinalTable, prop = 0.7)
+
+# Extraire les ensembles d'entraînement et de test
+Appr <- training(Appr_split)
+Valid <- testing(Appr_split)
+
+```
+
+Nous débutons avec une formule qui intègre tous nos variables explicatives dans 
+notre tableau final:
+
+                   form_base_logistique <- formula(ydon_2023 ~ 
+                                  Sexe + Age + Salary + Education + 
+                                  City + Times_Read + Years_Membership + 
+                                  Donation_2022 + Num_Donations + 
+                                  Yr_Until_Donation + Sum_Donations + ydon_2022)
+
+
+```{r}
+
+form_base_logistique <- formula(ydon_2023 ~ 
+                                  Sexe + Age + Salary + Education + 
+                                  City + Times_Read + Years_Membership + 
+                                  Donation_2022 + Num_Donations + 
+                                  Yr_Until_Donation + Sum_Donations + ydon_2022)
+
+modele_base_log <- glm( formula = form_base_logistique,
+                        data = Appr,
+                        family = binomial)
+
+
+```
+
+Lors de l'analyse exploratoire, on a vu que la majorité des donnateurs en 2023 
+n'ont pas été donnateur en 2022. Alors on a croisé cette variable avec tous les
+autres variables dans notre deuxième modèle. Cela nous permet d'aller chercher
+des liens un peux plus complexes tout en se basant sur le lien trouvé dans 
+l'analyse:
+
+              form_base_logistique2 <- formula(ydon_2023 ~ 
+                                  (Sexe + Age + Salary + Education + City + 
+                                  Times_Read + Years_Membership + Donation_2022 
+                                  + Num_Donations + Yr_Until_Donation + 
+                                  Sum_Donations + ydon_2022) *ydon_2022)
+
+
+```{r}
+
+form_base_logistique2 <- formula(ydon_2023 ~ 
+                                  (Sexe + Age + Salary + Education + City + 
+                                  Times_Read + Years_Membership + Donation_2022 
+                                  + Num_Donations + Yr_Until_Donation + 
+                                  Sum_Donations + ydon_2022) *ydon_2022)
+
+modele_base_log2 <- glm( formula = form_base_logistique2,
+                        data = Appr,
+                        family = binomial)
+```
+
+On a aussi vu qu'il y a un hausse de dons dans la deuxième année que les 
+individus sont membres. Alors on a ajouté le nombre d'années avant le 
+premier don comme terme d'intéraction dans notre troisième modèle:
+
+              form_base_logistique3 <- formula(ydon_2023 ~ 
+                                   (Sexe + Age + Salary + Education + City + 
+                                      Times_Read + Years_Membership + 
+                                      Donation_2022 + Num_Donations + 
+                                      Yr_Until_Donation + Sum_Donations + 
+                                      ydon_2022) * (ydon_2022 + 
+                                                      Yr_Until_Donation))
+
+```{r}
+
+form_base_logistique3 <- formula(ydon_2023 ~ 
+                                   (Sexe + Age + Salary + Education + City + 
+                                      Times_Read + Years_Membership + 
+                                      Donation_2022 + Num_Donations + 
+                                      Yr_Until_Donation + Sum_Donations + 
+                                      ydon_2022) * (ydon_2022 + 
+                                                      Yr_Until_Donation))
+
+modele_base_log3 <- glm( formula = form_base_logistique3,
+                         data = Appr,
+                         family = binomial)
+
+```
+
+Pour le dernier modèle, on a décidé d'utiliser le fait que la majorité des
+dons en 2023 venait des membres qui donnaient pour la première fois. On a donc
+ajouté le nombre de dons comme un dernier terme d'intéraction:
+
+            form_base_logistique4 <- formula(ydon_2023 ~ 
+                                   (Sexe + Age + Salary + Education + City + 
+                                      Times_Read + Years_Membership + 
+                                      Donation_2022 + Num_Donations + 
+                                      Yr_Until_Donation + Sum_Donations + 
+                                      ydon_2022) * (ydon_2022 + 
+                                      Yr_Until_Donation + Num_Donations))
+
+
+``` {r}
+
+form_base_logistique4 <- formula(ydon_2023 ~ 
+                                   (Sexe + Age + Salary + Education + City + 
+                                      Times_Read + Years_Membership + 
+                                      Donation_2022 + Num_Donations + 
+                                      Yr_Until_Donation + Sum_Donations + 
+                                      ydon_2022) * (ydon_2022 + 
+                                      Yr_Until_Donation + Num_Donations))
+
+modele_base_log4 <- glm( formula = form_base_logistique4,
+                         data = Appr,
+                         family = binomial)
+ 
+```
+
+##Performance et Validation
+
+### AIC et BIC
+
+Comme une première mesure de la performance du modèle, regardons les AIC et 
+BIC de chacun des modèles. 
+
+```{r}
+
+# 
+aic_log<- c(
+  AIC(modele_base_log),
+  AIC(modele_base_log2),
+  AIC(modele_base_log3),
+  AIC(modele_base_log4)
+)
+
+bic_log <- c(
+  BIC(modele_base_log),
+  BIC(modele_base_log2),
+  BIC(modele_base_log3),
+  BIC(modele_base_log4)
+)
+
+# Create a data frame with AIC and BIC
+aic_bic_table <- data.frame(
+  Model = c("Modèle 1", "Modèle 2", "Modèle 3", "Modèle 4"),
+  AIC = aic_log,
+  BIC = bic_log
+)
+
+print(aic_bic_table)
+
+```
+
+On peut voir que les AIC et les BIC diminuent avec la complexité des modèles. 
+
+À noter ici qu'on à essayer de faire la sélection de variables avec la fonction
+
+  MASS::stepAIC
+
+Mais soit il y avait des erreurs de colinearité, ou la formule sortait des 
+modèles avec des valeurs d'AIC ou BIC plus grand que le modèle simple.
+
+### Courbes ROC
+
+Comme mesure de performance globale de nos modèles logistiques, nous avons 
+utilisé des courbes ROC. On aurait pu utiliser des matrices de gain et la 
+validation croisée, mais on a décider de combiner nos modèles logistiques
+et linéaires dans un modèle Heckit. Dans ce modèle on a simplement à envoyer 
+nos cadeaux à ceux que le modèle prédit vont donner plus que $5 pour les 
+premiers 60 000, et $25 pour les prochains. 
+
+```{r}
+#predictions sur les données de validation
+predlog1 <- hecmulti::predvc(
+  modele = modele_base_log,
+  data = Valid,
+  K = 10, 
+  nrep = 1,
+  type = "response")
+
+predlog2 <- hecmulti::predvc(
+  modele = modele_base_log2,
+  data = Valid,
+  K = 10, 
+  nrep = 1,
+  type = "response")
+
+predlog3 <- hecmulti::predvc(
+  modele = modele_base_log3,
+  data = Valid,
+  K = 10, 
+  nrep = 1,
+  type = "response")
+
+predlog4 <- hecmulti::predvc(
+  modele = modele_base_log4,
+  data = Valid,
+  K = 10, 
+  nrep = 1,
+  type = "response")
+
+##Performance avec courbes ROC
+roc_log1 <- hecmulti::courbe_roc(
+  resp = Valid$ydon,
+  prob = predlog1,
+  plot = TRUE)
+print(roc_log1)
+
+roc_log2 <- hecmulti::courbe_roc(
+  resp = Valid$ydon,
+  prob = predlog2,
+  plot = TRUE)
+print(roc_log2)
+
+roc_log3 <- hecmulti::courbe_roc(
+  resp = Valid$ydon,
+  prob = predlog3,
+  plot = TRUE)
+print(roc_log3)
+
+roc_log4 <- hecmulti::courbe_roc(
+  resp = Valid$ydon,
+  prob = predlog4,
+  plot = TRUE)
+print(roc_log4)
+
+#Pour mettre toutes les courbes sur une graphique
+
+roc_log1_df <- data.frame(Sensibilité = roc_log1$sensib,
+                          Specificité = 1 - roc_log1$specif,
+                          Model = "1")
+
+roc_log2_df <- data.frame(Sensibilité = roc_log2$sensib,
+                         Specificité = 1 - roc_log2$specif,
+                         Model = "2")
+
+roc_log3_df <- data.frame(Sensibilité = roc_log3$sensib,
+                         Specificité = 1 - roc_log3$specif,
+                         Model = "3")
+
+roc_log4_df <- data.frame(Sensibilité = roc_log4$sensib,
+                        Specificité = 1 - roc_log4$specif,
+                        Model = "4")
+
+roc_data <- rbind(roc_log1_df, roc_log2_df, roc_log3_df, roc_log4_df)
+
+
+roc_curves<- ggplot(roc_data, aes(x = Specificité, y = Sensibilité, color = Model)) +
+  geom_line() +
+  geom_abline(linetype = "dashed", color = "gray") +  # Reference line for random guessing
+  labs(title = "ROC Curves Comparison", x = "Specificité", y = "Sensibilité") +
+  theme_minimal()
+print(roc_curves)
+
+ggsave("roc_curves.png", plot = roc_curves, width = 10, height = 8, dpi = 300)
+
+#Voir les aires
+
+aire_log1 <- roc_log1$aire
+aire_log2 <- roc_log2$aire
+aire_log3 <- roc_log3$aire
+aire_log4 <- roc_log4$aire
+
+aires <- data.frame(
+  Model = c("Model 1", "Model 2", "Model 3", "Model 4"),
+  Aire = c(aire_log1, aire_log2, aire_log3, aire_log4))
+
+kable(aires, caption = "Aires des modèles")
+
+```
+
+Ici, le modèle 4 (notre dernier modèle logistique) est celui qui maximise
+l'aire sous la courbe ROC (0.913). Alors, nous allons utiliser le modèle 4 pour la régression logistique.
+
+##Partie 3.2: Régression linéaire
+
+L'objectif de cette section est de construire un modèle de régression linéaire permettant de prédire le montant des dons effectués en 2023. Pour cela, nous avons sélectionné des membres qui ont effectivement fait un don en 2023 afin d'offrir une prédiction sur les caractéristiques qui influencent ces montants.
+
+###Préparation et séparation des données
+
+Nous avons commencé par filtrer les données pour ne conserver que les membres ayant fait un don en 2023, en utilisant l'indicateur binaire ydon_2023 == 1.
+
+Pour garantir une évaluation fiable du modèle, les données ont été séparées en deux sous-ensembles : 70% pour l'entraînement et 30% pour la validation. Pour ce faire, nous avons encore une fois utilisé la fonction initial_split et une graine de génération aléatoire (set.seed(777)) pour assurer la reproductibilité.
+
+```{r}
+##Nous commençons par sélectionner les membres qui ont fait un don en 2023 pour l'entrainement du modèle.
+
+FinalTable_train <- FinalTable |>
+  dplyr::filter(
+    ydon_2023 == 1,          # Filtrer sur les membres qui ont fait un don en 2023
+    !is.na(Donation_2023) # Assurer que Donation_2023 n'est pas manquant
+  )
+# Charger le package nécessaire pour diviser les données
+library(rsample)
+
+# Diviser les données en 70% pour l'entraînement et 30% pour la validation
+set.seed(777)  
+split_data <- initial_split(FinalTable_train, prop = 0.7)
+
+# Créer les ensembles d'entraînement et de validation
+train_data <- training(split_data)
+valid_data <- testing(split_data)
+```
+
+###Modélisation de la régression linéaire
+
+Nous avons d'abord construit un modèle linéaire avec toutes les variables explicatives disponibles, telles que Sexe, Age, Salary, Education, City, Times_Read, Years_Membership, Donation_2022, Num_Donations, Yr_Until_Donation, Sum_Donations, et ydon_2022.
+
+Donation_2023 ~ Sexe + Age + Salary + Education + City + 
+                Times_Read + Years_Membership + Donation_2022 + 
+                Num_Donations + Yr_Until_Donation + Sum_Donations +ydon_2022
+
+```{r}
+# Pour le premier modèle linéaire, nous utilisont toutes les variables 
+##explicatives qui ont été sélectionnées lors de l'analyse exploratoire
+
+modlin1 <- lm(Donation_2023 ~ Sexe + Age + Salary + Education + City + 
+                Times_Read + Years_Membership + Donation_2022 + 
+                Num_Donations + Yr_Until_Donation + Sum_Donations +ydon_2022,
+              data = train_data)
+
+predictionslin1 <- predict(modlin1, newdata = valid_data)
+
+# Calculer l'EQM sur l'ensemble de validation
+EQM_validationlin1 <- mean((valid_data$Donation_2023 - predictionslin1)^2)
+EQM_validationlin1
+```
+
+L'erreur quadratique moyenne (EQM) de ce modèle a été calculée pour évaluer la précision des prédictions sur l'ensemble de validation.D'autres modèles devrons être construits afin de comparer la précision de ce premier modèle.
+
+###Sélection de variables avec leaps::regsebsets
+
+Dans cette section, nous avons utilisé la fonction regsubsets du package leaps pour réaliser une sélection de variables pour notre modèle de régression linéaire en vue de comparer nos modèles et de minimiser l'erreur quadratique moyenne (EQM) afin d'améliorer la performance prédictive. Cette méthode nous permet d'explorer plusieurs modèle et sélectionner celui qui offre le plus petit BIC. Pour la fonction leaps::regsubsets, nous avons choisi la méthode "exhaustive" compte tenu que le nombre de varialbes n'était pas trop élevé. Cette méthode nous permettra de trouver un équilibre entre l'ajustement du modèle et la simplicité. 
+
+```{r}
+##Nous pouvons utiliser la fonction "leaps" afin de trouver les variables du modèle qui donne le plus petit EQM
+
+library(hecmulti)
+rec_ex <- leaps::regsubsets(
+  x= Donation_2023 ~ Sexe + Age + Salary + Education + City + 
+    Times_Read + Years_Membership + Donation_2022 + 
+    Num_Donations + Yr_Until_Donation + Sum_Donations,
+  nvmax = 13L,
+  method = "exhaustive",
+  data = FinalTable_train
+)
+
+resume_rec_ex <- summary(rec_ex,
+                         matrix.logical = TRUE)
+min_BIC <- which.min(resume_rec_ex$bic)
+rec_ex$xnames[resume_rec_ex$which[min_BIC,]]
+```
+
+La combinaison de variable qui a permis d'obtenir le plus petit BIC est: "Sexe", "Age", "Salary", "City" ainsi que "Times_Read". Nous allons donc bâtir un modèle de régression à l'aide de ces variables et en évaluer la performance à l'aide de l'EQM.
+
+###Modèle de régression linéaire 2 avec les variables obtenues de la fonction leaps::regsebsets
+
+Voici l'équation retenu pour le 2e modèle de régression linéaire:
+
+Donation_2023 ~ Sexe + Age + Salary + City + Times_Read
+
+```{r}
+##À l'aide de ces variables, nous pouvons maintenant vérifier la performance de ce 2e modèle de régression linéaire
+
+modlin2 <- lm(Donation_2023 ~ Sexe + Age + Salary + City + Times_Read, data = train_data)
+
+# Faire des prédictions sur les données de validation
+predictionslin2 <- predict(modlin2, newdata = valid_data)
+
+# Calculer l'EQM sur l'ensemble de validation
+EQM_validationlin2 <- mean((valid_data$Donation_2023 - predictionslin2)^2)
+EQM_validationlin2
+```
+
+Pour ce deuxième modèle de régression, on observe effectivement in BIC plus bas à 1293721 et un EQM qui est également plus bas à 20410.85. Ceci suggère alors une meilleure précision pour ce modèle.
+
+###Ajout de termes d'interaction à un modèle de régression linéaire
+
+Maintenant, nous voulons tester les interactions entre les variables. En ajoutant l'opérateur ^2, nous explorons si deux variables peuvent conjointement avoir un effet sur la variables "Donation_2023". Cet opérateur ajoute alors toutes les interactions possibles du 2e modèle de régression afin de capturer leur effets combinés. Notre hypothèse est alors que ces interactions permettrons d'augmenter la précision du modèle.
+
+Donation_2023 ~ (Sexe + Age + Salary + City + Times_Read)^2
+
+```{r}
+##Nous pouvons ajouter un terme d'interaction à notre régression linéaire afin de
+##vérifier si nous pouvons obtenir un plus petit EQM
+
+modlin3 <- lm(Donation_2023 ~ (Sexe + Age + Salary + City + Times_Read)^2, data = train_data)
+
+# Faire des prédictions sur les données de validation
+predictionslin3 <- predict(modlin3, newdata = valid_data)
+
+# Calculer l'EQM sur l'ensemble de validation
+EQM_validationlin3 <- mean((valid_data$Donation_2023 - predictionslin3)^2)
+EQM_validationlin3
+
+```
+
+###Présentation des résultats pour la sélection du modèle de régression linéaire
+
+Voici les résultats des BIC ainsi que des EQM obtenus pour les 3 modèles de régression linéaire qui ont été construits.
+
+```{r}
+##Tableau récapitulatif afin de bien visualiser les résultats et émettre une conclusion
+
+# Calculer le BIC et l'EQM pour chaque modèle
+bic_modlin1 <- BIC(modlin1)
+bic_modlin2 <- BIC(modlin2)
+bic_modlin3 <- BIC(modlin3)
+
+# Créer un tableau comparatif
+Comparaison_Reglin <- data.frame(
+  Modele = c("modlin1", "modlin2", "modlin3"),
+  BIC = c(bic_modlin1, bic_modlin2, bic_modlin3),
+  EQM = c(EQM_validationlin1, EQM_validationlin2, EQM_validationlin3)
+)
+
+print(Comparaison_Reglin)
+```
+À la lumière de ces résultats, on observe que le modèle "modlin2" possède le plus petit BIC alors que le modèle modlin3 possède le plus petit EQM. Pour ce qui est du modèle "modlin3", nous avons deux hypothèses quant aux limites potentielles de ce modèle. Premièrement, puisque nous avons ajouter plusieurs interactions, nous augmentons le nombre de paramêtre à estimer et nous augmentons également la complexité du modèle ce qui peut réduire la capacité a interpréter facilement le modèle. Ensuite, ajouter toutes les interactions possibles pour ce modèle amène un problème potentiel de surajustement si ces interactions ne sont pas significatives. Cette situation pourrait alors compromettre la performance du modèle au moment de faire des prédictions sur de nouvelles données.
+
+Le modèle "modlin2" sera alors utiliser pour la suite.
+
+##Partie 3.3: Modèle Heckit
+
+Pour cette partie, nous avons décidé d'appliquer le modèle de sélection "Heckit" afin de modéliser la probabilité de faire un don ou non avec notre modèle de régression logistique, ainsi que le montant de ce don à l'aide de notre régression linéaire.
+
+Encore une fois, Pour garantir une évaluation fiable du modèle, les données ont été séparées en deux sous-ensembles : 70% pour l'entraînement et 30% pour la validation. Pour ce faire, nous avons encore une fois utilisé la fonction initial_split et une graine de génération aléatoire (set.seed(777)) pour assurer la reproductibilité.
+
+```{r}
+# Diviser les données en entraînement et validation
+
+# Fixer la seed pour la reproductibilité
+set.seed(777)
+
+# Mélanger les données pour éviter tout biais potentiel dû à un ordre spécifique
+FinalTable1 <- FinalTable[sample(nrow(FinalTable)), ]
+
+# Diviser les données en 70% pour l'entraînement et 30% pour la validation
+split_data1 <- initial_split(FinalTable1, prop = 0.7)
+
+# Créer les ensembles d'entraînement et de validation
+train_data1 <- training(split_data1)
+valid_data1 <- testing(split_data1)
+
+```
+
+Nous avons ensuite ajouté notre régression logistique ainsi que notre régression linéaire au Heckit et procédé à l'évaluation.
+
+```{r}
+# Ajustement du modèle Heckit
+heckit_model <- sampleSelection::heckit(
+  selection = form_base_logistique4,
+  outcome = formula(modlin2),
+  method = "ml",
+  data = train_data1
+)
+
+# Résumé du modèle Heckman
+summary(heckit_model)
+
+
+pred_prob_don <- predict(heckit_model, part = "selection", newdata = valid_data1, type = "response")
+pred_montant_don <- predict(heckit_model, part = "outcome", newdata = valid_data1)
+predicted_donation <- pred_prob_don * pred_montant_don
+
+EQM_heckman <- mean((valid_data1$Donation_2023 - predicted_donation)^2)
+EQM_heckman
+
+```
+
+###Résultats pour le Heckit
+
+Le modèle Heckit est divisé en deux parties soit le modèle de sélection qui utilise "form_base_logistique4" ainsi que le modèle d'issue (outcome) qui utilise "modlin2".Pour la sélection, nous modélisons la probabilité qu'un membre fasse un don ou non en fonction des variables qui ont été sélectionnées préalablement.Pour le "outcome", une fois que la probabilité de donner ou non a été modélisée, nous utilisons la régression linéaires afin de prédire une variable continue qui correspond au montant du don conditionnellement au fait qu'un don a été fait ou non. 
+
+Pour le calcul de l'EQM, nous avons faire des prédictions en multipliant la prédiction pour la "selection" et le "outcome". Nous avons ainsi obtenu des prédictions pour un montant de don pour chaque membre ayant été prédit de faire un don. En comparant ces prédictions à nos données de validation, nous avons obtenu un EQM de 2891.039. Il s'agit alors de la meilleur précision obtenue une fois les 2 meilleurs modèles combinés.
+
+Pour finir, notre modèle prédit que nous devrions envoyer une trousse de remerciement à 170 000 membres.
+
+
